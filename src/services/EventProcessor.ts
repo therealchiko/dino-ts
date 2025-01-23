@@ -3,6 +3,8 @@ import { Dinosaur } from '../models/Dinosaur';
 import { Maintenance } from '../models/Maintenance';
 import { Zone } from '../models/Zone';
 import { DinoAddedEvent, DinoFedEvent, DinoLocationEvent, DinoRemovedEvent, FeedEvent, MaintenanceEvent } from '../types/events';
+import { CacheService } from './CacheService';
+import { ParkController } from '../controllers/ParkController';
 
 export class EventProcessor {
   private dinoRepo: Repository<Dinosaur>;
@@ -43,6 +45,9 @@ export class EventProcessor {
           break;
       }
       await queryRunner.commitTransaction();
+
+      // Invalidate cache after successful event processing
+      CacheService.invalidate(ParkController.CACHE_KEY);
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;

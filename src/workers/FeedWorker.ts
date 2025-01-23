@@ -10,8 +10,8 @@ export class FeedWorker {
   private static eventProcessor: EventProcessor;
 
   static async start() {
-    await AppDataSource.initialize();
-    this.eventProcessor = new EventProcessor();
+    const dataSource = await AppDataSource.initialize();
+    this.eventProcessor = new EventProcessor(dataSource);
     
     // Run every minute
     cron.schedule('* * * * *', async () => {

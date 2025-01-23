@@ -4,5 +4,4 @@ module.exports = {
   setupFilesAfterEnv: ["<rootDir>/src/test/setup.ts"],
   testTimeout: 10000,
   forceExit: true,
-  detectOpenHandles: true,
 };

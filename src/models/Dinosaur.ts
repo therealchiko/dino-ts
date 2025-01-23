@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, AfterLoad } from "typeorm";
+import { differenceInHours } from 'date-fns';
 
 @Entity('dinosaurs')
 export class Dinosaur {
@@ -40,4 +41,24 @@ export class Dinosaur {
 
   @UpdateDateColumn()
   updated_at!: Date;
+
+  isDigesting!: boolean;
+
+  @AfterLoad()
+  calculateDigestionStatus() {
+    if (!this.last_fed || !this.digestion_period_in_hours) {
+      this.isDigesting = false;
+      return;
+    }
+
+    const hoursSinceLastFed = differenceInHours(new Date(), new Date(this.last_fed));
+    this.isDigesting = hoursSinceLastFed < this.digestion_period_in_hours;
+  }
+
+  isSafe(): boolean {
+    if (this.herbivore) {
+      return true;
+    }
+    return this.isDigesting;
+  }
 }

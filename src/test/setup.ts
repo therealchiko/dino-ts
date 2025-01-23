@@ -6,8 +6,6 @@ import { Maintenance } from '../models/Maintenance';
 
 dotenv.config({ path: '.env.test' });
 
-jest.setTimeout(30000);
-
 // maintain one connection across all tests
 export const testDataSource = new DataSource({
   type: 'postgres',
@@ -29,7 +27,5 @@ beforeAll(async () => {
 afterAll(async () => {
   if (testDataSource.isInitialized) {
     await testDataSource.destroy();
-    // Getting jest not closing connection after all tests, this just gives it more time
-    await new Promise(resolve => setTimeout(resolve, 500));
   }
 });

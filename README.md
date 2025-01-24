@@ -124,7 +124,7 @@ Gives data about a specific dinosaur
    - Include request/response examples
    - Better error documentation
 
-3. **Monitoring & Logging**
+3. **Monitoring**
    - Set up proper error tracking (e.g., Sentry)
 
 5. **Safety Features**
@@ -132,15 +132,8 @@ Gives data about a specific dinosaur
    - Add request validation middleware
    - Implement proper authentication/authorization
 
-6. **Performance Optimizations**
+6. **Performance**
    - Add database indexing strategy
-   - Implement more sophisticated caching
-   - Add database connection pooling
-
-7. **Developer Experience**
-   - Add better development tooling (ESLint, Prettier)
-   - Implement CI/CD pipeline
-   - Add better documentation for local development
 
 ## What I learned
 

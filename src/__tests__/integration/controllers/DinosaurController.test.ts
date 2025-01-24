@@ -1,7 +1,7 @@
 import request from 'supertest';
-import app from '../app';
-import { testDataSource } from '../test/setup';
-import { Dinosaur } from '../models/Dinosaur';
+import app from '../../../app';
+import { Dinosaur } from '../../../models/Dinosaur';
+import { testDataSource } from '../../../test/setup';
 
 describe('DinosaurController', () => {
   beforeEach(async () => {

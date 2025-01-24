@@ -1,12 +1,13 @@
+import { subHours } from "date-fns";
+import { ParkController } from "../../../controllers/ParkController";
+import { Dinosaur } from "../../../models/Dinosaur";
+import { EventLog } from "../../../models/EventLog";
+import { Zone } from "../../../models/Zone";
+import { CacheService } from "../../../services/CacheService";
+import { EventProcessor } from "../../../services/EventProcessor";
+import { testDataSource } from "../../../test/setup";
+import app from "../../../app";
 import request from 'supertest';
-import app from '../app';
-import { testDataSource } from '../test/setup';
-import { Zone } from '../models/Zone';
-import { Dinosaur } from '../models/Dinosaur';
-import { subHours } from 'date-fns';
-import { CacheService } from '../services/CacheService';
-import { EventProcessor } from '../services/EventProcessor';
-import { ParkController } from './ParkController';
 
 describe('ParkController', () => {
   let eventProcessor: EventProcessor;
@@ -21,7 +22,7 @@ describe('ParkController', () => {
 
   describe('GET /api/park/status', () => {
     it('should return detailed herbivore status', async () => {
-      await testDataSource.getRepository(Zone).save({
+      const zone = await testDataSource.getRepository(Zone).save({
         code: 'A1',
         park_id: 1,
         last_maintenance: new Date()
@@ -33,7 +34,7 @@ describe('ParkController', () => {
         dinosaur_id: 1,
         park_id: 1,
         active: true,
-        location: 'A1',
+        location_code: 'A1',
         herbivore: true,
         last_fed: new Date(),
         digestion_period_in_hours: 24
@@ -43,21 +44,22 @@ describe('ParkController', () => {
         .get('/api/park/status')
         .expect(200);
 
-      const zone = response.body.zones[0];
-      expect(zone.occupant).toMatchObject({
-        name: 'Herb',
-        species: 'Triceratops',
-        herbivore: true,
-        isDigesting: true
+      const responseZone = response.body.zones[0];
+      expect(responseZone.occupancy).toMatchObject({
+        hasOccupant: true,
+        isSafe: true,
+        details: {
+          name: 'Herb',
+          species: 'Triceratops',
+          herbivore: true,
+          isDigesting: true
+        }
       });
-      expect(response.body.occupiedZones).toBe(1);
+      expect(response.body.stats.occupiedZones).toBe(1);
     });
 
     it('should show digestion statuses', async () => {
-      // Clear any existing data
-      await testDataSource.createQueryRunner().query('TRUNCATE zones, dinosaurs CASCADE');
-      
-      await testDataSource.getRepository(Zone).save({
+      const zone = await testDataSource.getRepository(Zone).save({
         code: 'B2',
         park_id: 1,
         last_maintenance: new Date()
@@ -70,7 +72,7 @@ describe('ParkController', () => {
         dinosaur_id: 2,
         park_id: 1,
         active: true,
-        location: 'B2',
+        location_code: 'B2',
         herbivore: false,
         last_fed: subHours(new Date(), digestionPeriod - 1),
         digestion_period_in_hours: digestionPeriod
@@ -80,15 +82,18 @@ describe('ParkController', () => {
         .get('/api/park/status')
         .expect(200);
 
-      const zone = response.body.zones[0];
-      expect(zone.occupant).toMatchObject({
-        name: 'Rex',
-        species: 'T-Rex',
-        herbivore: false,
-        isDigesting: true,
-        digestionPeriodInHours: digestionPeriod
+      const responseZone = response.body.zones[0];
+      expect(responseZone.occupancy).toMatchObject({
+        hasOccupant: true,
+        isSafe: true,
+        details: {
+          name: 'Rex',
+          species: 'T-Rex',
+          herbivore: false,
+          isDigesting: true,
+          digestionPeriodInHours: digestionPeriod
+        }
       });
-      expect(zone.hasSafeOccupant).toBe(true);
     });
 
     it('should handle hungry carnivore status', async () => {
@@ -108,7 +113,7 @@ describe('ParkController', () => {
         dinosaur_id: 3,
         park_id: 1,
         active: true,
-        location: 'C3',
+        location_code: 'C3',
         herbivore: false,
         last_fed: subHours(new Date(), digestionPeriod + 1),
         digestion_period_in_hours: digestionPeriod
@@ -119,14 +124,17 @@ describe('ParkController', () => {
         .expect(200);
 
       const zone = response.body.zones[0];
-      expect(zone.occupant).toMatchObject({
-        name: 'Rex',
-        species: 'T-Rex',
-        herbivore: false,
-        isDigesting: false,
-        digestionPeriodInHours: digestionPeriod
+      expect(zone.occupancy).toMatchObject({
+        hasOccupant: true,
+        isSafe: false,
+        details: {
+          name: 'Rex',
+          species: 'T-Rex',
+          herbivore: false,
+          isDigesting: false,
+          digestionPeriodInHours: digestionPeriod
+        }
       });
-      expect(zone.hasSafeOccupant).toBe(false);
     });
   });
 
@@ -163,8 +171,7 @@ describe('ParkController', () => {
         .get('/api/park/status')
         .expect(200);
 
-      // Process a new event
-      await eventProcessor.processEvent({
+      const event = {
         kind: 'dino_added',
         name: 'Rex',
         species: 'T-Rex',
@@ -173,17 +180,32 @@ describe('ParkController', () => {
         digestion_period_in_hours: 48,
         herbivore: false,
         park_id: 1,
-        time: new Date().toISOString()
-      });
+        time: new Date(),
+      };
+
+      // Process a new event
+      await eventProcessor.processEvent({
+        ...event,
+        raw_event: {
+          ...event
+        }
+      } as EventLog);
+
+      const locationUpdatedEvent = {
+        kind: 'dino_location_updated',
+        dinosaur_id: 1,
+        time: new Date(),
+        location: 'A1',
+        park_id: 1,
+      };
 
       // moved Rex to A1
       await eventProcessor.processEvent({
-        kind: 'dino_location_updated',
-        dinosaur_id: 1,
-        time: new Date().toISOString(),
-        location: 'A1',
-        park_id: 1,
-      })
+        ...locationUpdatedEvent,
+        raw_event: {
+          ...locationUpdatedEvent
+        }
+      } as EventLog)
 
       // Get status again - should reflect new dinosaur
       const response2 = await request(app)
@@ -191,9 +213,9 @@ describe('ParkController', () => {
         .expect(200);
 
       // Verify cache was invalidated and new data is returned
-      expect(response1.body.occupiedZones).toBe(0);
-      expect(response2.body.occupiedZones).toBe(1);
-      expect(response2.body.zones[0].occupant).toMatchObject({
+      expect(response1.body.stats.occupiedZones).toBe(0);
+      expect(response2.body.stats.occupiedZones).toBe(1);
+      expect(response2.body.zones[0].occupancy.details).toMatchObject({
         name: 'Rex',
         species: 'T-Rex'
       });
@@ -226,7 +248,7 @@ describe('ParkController', () => {
         .get('/api/park/status')
         .expect(200);
 
-      expect(response.body.totalZones).toBe(2);
+      expect(response.body.zones.length).toBe(2);
     });
   });
 });

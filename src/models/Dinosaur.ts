@@ -1,5 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, AfterLoad } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, AfterLoad, JoinColumn, OneToOne, AfterInsert } from "typeorm";
 import { differenceInHours } from 'date-fns';
+import { Zone } from "./Zone";
 
 @Entity('dinosaurs')
 export class Dinosaur {
@@ -28,7 +29,11 @@ export class Dinosaur {
   park_id!: number;
 
   @Column({ nullable: true })
-  location!: string;
+  location_code!: string;
+
+  @OneToOne(() => Zone, { nullable: true })
+  @JoinColumn({ name: 'location_code', referencedColumnName: 'code' })
+  location!: Zone;
 
   @Column({ nullable: true, type: 'timestamp' })
   last_fed!: Date;
@@ -39,12 +44,13 @@ export class Dinosaur {
   @CreateDateColumn()
   created_at!: Date;
 
-  @UpdateDateColumn()
+  @Column({ nullable: true })
   updated_at!: Date;
 
   isDigesting!: boolean;
 
   @AfterLoad()
+  @AfterInsert()
   calculateDigestionStatus() {
     if (!this.last_fed || !this.digestion_period_in_hours) {
       this.isDigesting = false;

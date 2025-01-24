@@ -1,5 +1,5 @@
 import { differenceInDays } from "date-fns/differenceInDays";
-import { Entity, PrimaryGeneratedColumn, Column, AfterLoad } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, AfterLoad, OneToOne, JoinColumn, AfterInsert } from "typeorm";
 import { Dinosaur } from "./Dinosaur";
 
 @Entity('zones')
@@ -21,6 +21,7 @@ export class Zone {
   daysSinceLastMaintenance!: number;
 
   @AfterLoad()
+  @AfterInsert()
   calculateMaintenanceStatus() {
     if (!this.last_maintenance) {
       // requiring maintenance is a case of there not being an unsafe dinosaur, otherwise
@@ -36,21 +37,39 @@ export class Zone {
     this.requiresMaintenance = this.daysSinceLastMaintenance > 30;
   }
 
-  isSafeForMaintenance(occupant: Dinosaur | null): boolean {
-    return this.requiresMaintenance && (!occupant || occupant.isSafe());
-  }
+  @OneToOne(() => Dinosaur, dinosaur => dinosaur.location, { eager: true })
+  occupant?: Dinosaur;
 
-  getStatus(occupant: Dinosaur | null) {
-    const hasOccupant = !!occupant;
-    const hasSafeOccupant = !hasOccupant || (occupant && occupant.isSafe());
+  getStatus() {
+    if (this.daysSinceLastMaintenance === undefined) {
+      this.calculateMaintenanceStatus();
+    }
+
+    const hasOccupant = !!this.occupant;
+    const hasSafeOccupant = !hasOccupant || (this.occupant && this.occupant.isSafe());
 
     return {
       code: this.code,
-      requiresMaintenance: this.requiresMaintenance,
-      daysSinceLastMaintenance: this.daysSinceLastMaintenance,
-      safeForMaintenance: this.isSafeForMaintenance(occupant),
-      hasOccupant,
-      hasSafeOccupant,
-    };
+      maintenance: {
+        required: this.requiresMaintenance,
+        daysSinceLastMaintenance: this.daysSinceLastMaintenance,
+        safeForMaintenance: this.isSafeForMaintenance(),
+      },
+      occupancy: {
+        hasOccupant,
+        isSafe: hasOccupant ? hasSafeOccupant : true,
+        details: hasOccupant ? {
+          name: this.occupant!.name,
+          species: this.occupant!.species,
+          herbivore: this.occupant!.herbivore,
+          isDigesting: this.occupant!.isDigesting,
+          digestionPeriodInHours: this.occupant!.digestion_period_in_hours
+        } : null,
+      }
+    }
+  }
+
+  isSafeForMaintenance(): boolean {
+    return (!this.occupant || this.occupant.isSafe());
   }
 }

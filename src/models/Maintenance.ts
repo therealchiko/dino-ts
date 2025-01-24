@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from "typeorm";
+import { Zone } from "./Zone";
 
 @Entity('maintenance')
 export class Maintenance {
@@ -7,6 +8,10 @@ export class Maintenance {
 
   @Column()
   location!: string;
+
+  @ManyToOne(() => Zone)
+  @JoinColumn({ name: 'location', referencedColumnName: 'code' })
+  zone!: Zone;
 
   @Column('int')
   park_id!: number;

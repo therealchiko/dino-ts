@@ -1,12 +1,11 @@
 import dotenv from 'dotenv';
 import { DataSource } from 'typeorm';
 import { Dinosaur } from '../models/Dinosaur';
-import { Zone } from '../models/Zone';
+import { EventLog } from '../models/EventLog';
 import { Maintenance } from '../models/Maintenance';
-
+import { Zone } from '../models/Zone';
 dotenv.config({ path: '.env.test' });
 
-// maintain one connection across all tests
 export const testDataSource = new DataSource({
   type: 'postgres',
   host: process.env.DB_HOST,
@@ -14,16 +13,14 @@ export const testDataSource = new DataSource({
   username: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  entities: [Dinosaur, Zone, Maintenance],
+  entities: [Dinosaur, Zone, Maintenance, EventLog],
   synchronize: true // similar ro refreshDatabase
 });
 
-// Global setup
 beforeAll(async () => {
   await testDataSource.initialize();
 });
 
-// Global teardown
 afterAll(async () => {
   if (testDataSource.isInitialized) {
     await testDataSource.destroy();

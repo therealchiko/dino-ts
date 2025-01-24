@@ -75,7 +75,7 @@ export class InitialMigration1709123456789 implements MigrationInterface {
                     type: "integer"
                 },
                 {
-                    name: "location",
+                    name: "location_code",
                     type: "varchar",
                     isNullable: true
                 },
@@ -97,7 +97,15 @@ export class InitialMigration1709123456789 implements MigrationInterface {
                 {
                     name: "updated_at",
                     type: "timestamp",
-                    default: "now()"
+                    isNullable: true,
+                }
+            ],
+            foreignKeys: [
+                {
+                    columnNames: ["location_code"],
+                    referencedTableName: "zones",
+                    referencedColumnNames: ["code"],
+                    onDelete: "SET NULL"
                 }
             ]
         }), true);

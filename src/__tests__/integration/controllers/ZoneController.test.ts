@@ -1,10 +1,11 @@
-import request from 'supertest';
-import app from "../app";
-import { Maintenance } from "../models/Maintenance";
-import { Zone } from "../models/Zone";
-import { testDataSource } from "../test/setup";
 
-describe('ZoneController Tests', () => {
+import request from 'supertest';
+import app from '../../../app';
+import { Maintenance } from '../../../models/Maintenance';
+import { Zone } from '../../../models/Zone';
+import { testDataSource } from '../../../test/setup';
+
+describe('ZoneController', () => {
     beforeEach(async () => {
     await testDataSource.createQueryRunner().query('TRUNCATE zones, maintenance CASCADE');
   });

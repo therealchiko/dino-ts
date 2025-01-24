@@ -5,6 +5,8 @@ import { Zone } from '../models/Zone';
 import { DinoAddedEvent, DinoFedEvent, DinoLocationEvent, DinoRemovedEvent, FeedEvent, MaintenanceEvent } from '../types/events';
 import { CacheService } from './CacheService';
 import { ParkController } from '../controllers/ParkController';
+import { EventLog } from '../models/EventLog';
+import dayjs from 'dayjs';
 
 export class EventProcessor {
   private dinoRepo: Repository<Dinosaur>;
@@ -19,16 +21,41 @@ export class EventProcessor {
     this.zoneRepo = dataSource.getRepository(Zone);
   }
 
-  async processEvent(event: FeedEvent): Promise<void> {
+  async processEvent(event: EventLog): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
-
-    // if things go awry, let's be able to rollback the entire transaction
     await queryRunner.startTransaction();
 
     try {
+      // If this is a location update, check if the dinosaur exists first
+      if (event.kind === 'dino_location_updated') {
+        const rawEvent = event.raw_event as DinoLocationEvent;
+        const dino = await queryRunner.manager.findOne(Dinosaur, {
+          where: { dinosaur_id: rawEvent.dinosaur_id }
+        });
+
+        if (!dino) {
+          // Find and process the dino_added event first
+          const addEvent = await queryRunner.manager.findOne(EventLog, {
+            where: {
+              kind: 'dino_added',
+              raw_event: { id: rawEvent.dinosaur_id }
+            },
+            order: { time: 'ASC' }
+          });
+
+          if (addEvent) {
+            await this.handleDinoAdded(addEvent, queryRunner);
+            // we still need to add location because it's not handled by dino_added
+            await this.handleDinoLocation(event, queryRunner);
+          }
+        }
+      }
+
+      // Process the current event
       switch (event.kind) {
         case 'dino_added':
+          // console.log("adding dino");
           await this.handleDinoAdded(event, queryRunner);
           break;
         case 'dino_fed':
@@ -45,8 +72,6 @@ export class EventProcessor {
           break;
       }
       await queryRunner.commitTransaction();
-
-      // Invalidate cache after successful event processing
       CacheService.invalidate(ParkController.CACHE_KEY);
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -56,9 +81,10 @@ export class EventProcessor {
     }
   }
 
-  private async handleDinoAdded(event: DinoAddedEvent, queryRunner: QueryRunner): Promise<void> {
+  private async handleDinoAdded(event: EventLog, queryRunner: QueryRunner): Promise<void> {
+    const rawEvent = event.raw_event as DinoAddedEvent;
     const existingDino = await queryRunner.manager.findOne(Dinosaur, {
-      where: { dinosaur_id: event.id }
+      where: { dinosaur_id: rawEvent.id }
     });
 
     if (existingDino) {
@@ -66,78 +92,129 @@ export class EventProcessor {
     }
 
     const dino = queryRunner.manager.create(Dinosaur, {
-      name: event.name,
-      species: event.species,
-      gender: event.gender,
-      dinosaur_id: event.id,
-      digestion_period_in_hours: event.digestion_period_in_hours,
-      herbivore: event.herbivore,
-      park_id: event.park_id,
-      active: true
+      name: rawEvent.name,
+      created_at: event.time,
+      updated_at: event.time,
+      gender: rawEvent.gender,
+      park_id: rawEvent.park_id,
+      species: rawEvent.species,
+      dinosaur_id: rawEvent.id,
+      herbivore: rawEvent.herbivore,
+      digestion_period_in_hours: rawEvent.digestion_period_in_hours,
+      active: true,
     });
     await queryRunner.manager.save(Dinosaur, dino);
   }
 
-  private async handleDinoFed(event: DinoFedEvent, queryRunner: QueryRunner): Promise<void> {
-    const result = await queryRunner.manager.update(Dinosaur, 
-      { dinosaur_id: event.dinosaur_id, active: true },
-      { last_fed: new Date(event.time) }
-    );
-
-    if (result.affected === 0) {
-      throw new Error(`Dinosaur ${event.dinosaur_id} not found or not active`);
-    }
-  }
-
-  private async handleDinoLocation(event: DinoLocationEvent, queryRunner: QueryRunner): Promise<void> {
-    const zone = await queryRunner.manager.findOne(Zone, {
-      where: { code: event.location }
+  private async handleDinoFed(event: EventLog, queryRunner: QueryRunner): Promise<void> {
+    const rawEvent = event.raw_event as DinoFedEvent;
+    const dino = await queryRunner.manager.findOne(Dinosaur, {
+      where: { dinosaur_id: rawEvent.dinosaur_id, active: true }
     });
 
-    if (!zone) {
-      throw new Error(`Invalid zone location: ${event.location}`);
+    if (!dino) {
+      throw new Error(`Dinosaur ${rawEvent.dinosaur_id} not found or not active`);
     }
 
-    const result = await queryRunner.manager.update(Dinosaur,
-      { dinosaur_id: event.dinosaur_id, active: true },
-      { location: event.location }
-    );
+    if (!dino.last_fed || event.time > dino.last_fed) {
+      const result = await queryRunner.manager.update(Dinosaur, 
+        { dinosaur_id: rawEvent.dinosaur_id, active: true },
+        { last_fed: event.time }
+      );
 
-    if (result.affected === 0) {
-      throw new Error(`Dinosaur ${event.dinosaur_id} not found or not active`);
+      if (result.affected === 0) {
+        throw new Error(`Failed to update feeding time for dinosaur ${rawEvent.dinosaur_id}`);
+      }
     }
   }
 
-  private async handleDinoRemoved(event: DinoRemovedEvent, queryRunner: QueryRunner): Promise<void> {
+  private async handleDinoLocation(event: EventLog, queryRunner: QueryRunner): Promise<void> {
+    const rawEvent = event.raw_event as DinoLocationEvent;
+    // console.log('Processing location update:', {
+    //   event_id: event.id,
+    //   dinosaur_id: rawEvent.dinosaur_id,
+    //   location: rawEvent.location,
+    //   time: event.time
+    // });
+
+    const [zone, dino] = await Promise.all([
+      queryRunner.manager.findOne(Zone, {
+        where: { code: rawEvent.location }
+      }),
+      queryRunner.manager.findOne(Dinosaur, {
+        where: { dinosaur_id: rawEvent.dinosaur_id, active: true }
+      })
+    ]);
+
+    if (!zone) {
+      throw new Error(`Invalid zone location: ${rawEvent.location}`);
+    }
+
+    if (!dino) {
+      throw new Error(`Dinosaur ${rawEvent.dinosaur_id} not found or not active`);
+    }
+
+    // Let's add some debugging
+    // console.log('Updating location:', {
+    //   dinosaur_id: rawEvent.dinosaur_id,
+    //   oldLocation: dino.location,
+    //   newLocation: rawEvent.location,
+    //   eventTime: event.time,
+    //   lastUpdate: dino.updated_at
+    // });
+    
+    
+    if (!dino.updated_at || dayjs(event.time).isAfter(dayjs(dino.updated_at))) {
+      const result = await queryRunner.manager.update(Dinosaur,
+        { dinosaur_id: rawEvent.dinosaur_id, active: true },
+        { 
+          location_code: rawEvent.location,
+          updated_at: event.time
+        }
+      );
+
+      if (result.affected === 0) {
+        throw new Error(`Failed to update location for dinosaur ${rawEvent.dinosaur_id}`);
+      }
+    }
+  }
+
+  private async handleDinoRemoved(event: EventLog, queryRunner: QueryRunner): Promise<void> {
+    const rawEvent = event.raw_event as DinoRemovedEvent;
     const result = await queryRunner.manager.update(Dinosaur,
-      { dinosaur_id: event.dinosaur_id, active: true },
+      { dinosaur_id: rawEvent.dinosaur_id, active: true },
       { active: false }
     );
 
     if (result.affected === 0) {
-      throw new Error(`Dinosaur ${event.dinosaur_id} not found or already inactive`);
+      throw new Error(`Dinosaur ${rawEvent.dinosaur_id} not found or already inactive`);
     }
   }
 
-  private async handleMaintenance(event: MaintenanceEvent, queryRunner: QueryRunner): Promise<void> {
+  private async handleMaintenance(event: EventLog, queryRunner: QueryRunner): Promise<void> {
+    const rawEvent = event.raw_event as MaintenanceEvent;
+    // Load zone without relations to avoid the eager loading issue
     const zone = await queryRunner.manager.findOne(Zone, {
-      where: { code: event.location }
+      select: ['id', 'code'],  // Only select needed fields
+      where: { code: rawEvent.location }
     });
 
     if (!zone) {
-      throw new Error(`Invalid zone location: ${event.location}`);
+      throw new Error(`Invalid zone location: ${rawEvent.location}`);
     }
 
     const maintenance = queryRunner.manager.create(Maintenance, {
-      location: event.location,
-      park_id: event.park_id,
-      performed_at: new Date(event.time)
+      location: rawEvent.location,
+      park_id: rawEvent.park_id,
+      performed_at: event.time,
+      zone: zone  // Set the relationship
     });
     await queryRunner.manager.save(Maintenance, maintenance);
 
+    // Update zone's last maintenance date
     await queryRunner.manager.update(Zone,
-      { code: event.location },
-      { last_maintenance: new Date(event.time) }
+      { code: rawEvent.location },
+      { last_maintenance: event.time }
     );
   }
 }
